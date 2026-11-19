@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>HarborDesk RAG Lab</title>
+    <style>
+      :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #19242c; background: #f2f5f7; }
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; }
+      main { width: min(860px, calc(100% - 32px)); margin: 56px auto; }
+      header { margin-bottom: 24px; }
+      h1 { margin: 0 0 8px; font-size: clamp(1.7rem, 4vw, 2.3rem); }
+      .lede { margin: 0; color: #52616b; line-height: 1.5; }
+      .demo-note { margin-top: 14px; padding: 10px 12px; border-left: 4px solid #b27412; background: #fff7e7; color: #62440e; font-size: .92rem; }
+      form, .panel { padding: 22px; border: 1px solid #d9e0e5; border-radius: 12px; background: white; box-shadow: 0 4px 16px #2437440b; }
+      label { display: block; margin: 0 0 7px; font-weight: 650; }
+      select, textarea, button { width: 100%; font: inherit; }
+      select, textarea { margin-bottom: 18px; border: 1px solid #aab7c0; border-radius: 7px; padding: 11px 12px; background: #fff; color: inherit; }
+      textarea { min-height: 120px; resize: vertical; line-height: 1.45; }
+      button { border: 0; border-radius: 7px; padding: 12px 16px; background: #176b55; color: white; font-weight: 650; cursor: pointer; }
+      button:disabled { opacity: .65; cursor: wait; }
+      #status { min-height: 1.5em; margin: 12px 0 0; color: #52616b; }
+      #result { margin-top: 22px; }
+      #answer { white-space: pre-wrap; line-height: 1.6; }
+      #answer p { margin: 0 0 12px; }
+      #answer ul { margin: 0 0 12px; padding-left: 24px; line-height: 1.6; }
+      .citation { display: inline-block; margin-left: 2px; color: #176b55; font-size: .82em; font-weight: 700; }
+      #sources { margin: 12px 0 0; padding-left: 22px; color: #52616b; }
+      .hidden { display: none; }
+      @media (max-width: 520px) { main { margin: 28px auto; } form, .panel { padding: 16px; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>HarborDesk RAG Lab</h1>
+        <p class="lede">Ask a question about the indexed documents. Answers include source citations.</p>
+        <p class="demo-note"><strong>Local demo:</strong> The access-group selector simulates a public, employee, or HR user. It is not sign-in and must not be exposed as production authentication.</p>
+      </header>
+      <form id="question-form">
+        <label for="principal">Demo access group</label>
+        <select id="principal" name="principal">
+          <option value="public">Public</option>
+          <option value="employee">Employee</option>
+          <option value="hr">HR</option>
+        </select>
+        <label for="query">Your question</label>
+        <textarea id="query" name="query" maxlength="2000" required placeholder="For example: How long does a credit card refund take?"></textarea>
+        <button id="submit" type="submit">Ask</button>
+        <p id="status" role="status" aria-live="polite"></p>
+      </form>
+      <section id="result" class="panel hidden" aria-live="polite">
+        <h2>Answer</h2>
+        <div id="answer"></div>
+        <h3>Sources</h3>
+        <ul id="sources"></ul>
+      </section>
+    </main>
+    <script>
+      const form = document.querySelector("#question-form");
+      const button = document.querySelector("#submit");
+      const status = document.querySelector("#status");
+      const result = document.querySelector("#result");
+      const answer = document.querySelector("#answer");
+      const sources = document.querySelector("#sources");
+
+      function appendInline(target, text) {
+        const pattern = /\*\*(.+?)\*\*|\[(S\d+)\]/g;
+        let offset = 0;
+        for (const match of text.matchAll(pattern)) {
+          target.append(document.createTextNode(text.slice(offset, match.index)));
+          const element = document.createElement(match[1] ? "strong" : "span");
+          if (match[1]) {
+            element.textContent = match[1];
+          } else {
+            element.className = "citation";
+            element.textContent = `[${match[2]}]`;
+          }
+          target.append(element);
+          offset = match.index + match[0].length;
+        }
+        target.append(document.createTextNode(text.slice(offset)));
+      }
+
+      function renderAnswer(text) {
+        answer.replaceChildren();
+        const blocks = text.split(/\n\s*\n/).filter((block) => block.trim());
+        for (const block of blocks) {
+          const lines = block.split("\n");
+          if (lines.every((line) => /^\s*[-*]\s+/.test(line))) {
+            const list = document.createElement("ul");
+            for (const line of lines) {
+              const item = document.createElement("li");
+              appendInline(item, line.replace(/^\s*[-*]\s+/, ""));
+              list.append(item);
+            }
+            answer.append(list);
+          } else {
+            const paragraph = document.createElement("p");
+            lines.forEach((line, index) => {
+              if (index) paragraph.append(document.createElement("br"));
+              appendInline(paragraph, line);
+            });
+            answer.append(paragraph);
+          }
+        }
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        button.disabled = true;
+        status.textContent = "Searching the documents and drafting an answer…";
+        result.classList.add("hidden");
+        answer.textContent = "";
+        sources.replaceChildren();
+        try {
+          const response = await fetch("/api/ask", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              principal: document.querySelector("#principal").value,
+              query: document.querySelector("#query").value,
+              top_k: 5
+            })
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.detail || "The request could not be completed.");
+          renderAnswer(data.answer);
+          for (const source of data.sources) {
+            const item = document.createElement("li");
+            const historical = source.status === "archived" ? " · archived historical version" : "";
+            item.textContent = `${source.id}: ${source.filename} · version ${source.version} · chunk ${source.chunk_index}${historical}`;
+            sources.append(item);
+          }
+          result.classList.remove("hidden");
+          status.textContent = "Answer ready.";
+        } catch (error) {
+          status.textContent = error.message || "Something went wrong.";
+        } finally {
+          button.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
