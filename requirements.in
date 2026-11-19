@@ -1,0 +1,13 @@
+# Direct runtime dependencies for the API, Postgres access, and OpenAI client.
+# pip-tools resolves and locks these plus their transitive dependencies into
+# requirements.txt; edit this file, then regenerate the lock.
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.34,<1.0
+psycopg[binary,pool]>=3.2,<4.0
+pydantic-settings>=2.8,<3.0
+python-dotenv>=1.0,<2.0
+openai>=1.68,<3.0
+pypdf>=5.3,<7.0
+pypdfium2>=4.30,<6.0
+pillow>=10.4,<13.0
+tiktoken>=0.9,<1.0
